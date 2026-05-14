@@ -50,7 +50,7 @@ router.get("/getusersbyid/:id", async (req, res) => {
 
     if (response.rows.length > 0) {
       result.data = response.rows;
-      res.json(result);
+      res.json({ result });
     } else {
       result.status = false;
       result.data = "No se encontraron resultados";
@@ -224,48 +224,82 @@ router.post("/getusersclient", async (req, res) => {
 router.post("/createusersclient", async (req, res) => {
   let result = { status: true, data: "" };
 
+  const client = await pool.connect();
+
   try {
-    const getuserByID = await pool.query(
-      `select password from users where email ='${req.body.email}'`,
+    await client.query("BEGIN");
+
+    const getuserByID = await client.query(
+      "SELECT password FROM users WHERE email = $1",
+      [req.body.email],
     );
 
     if (getuserByID.rowCount > 0) {
       result.status = false;
-      result.data = JSON.stringify("El email ingresado esta repetido");
-      res.json({ result });
-    } else {
-      const date = new Date();
-      const year = date.getFullYear();
-      const month = `0${date.getMonth() + 1}`.slice(-2);
-      const day = `0${date.getDate()}`.slice(-2);
+      result.data = "El email ingresado esta repetido";
 
-      const formattedDate = `${year}-${month}-${day}`;
+      await client.query("ROLLBACK");
 
-      const passwordHash = CryptoJS.SHA1(req.body.password).toString();
-
-      const maxid = await pool.query(`select max(id) from users`);
-
-      const newid = maxid.rows[0]["max"] + 1;
-
-      console.log(JSON.stringify(newid));
-
-      const response = await pool.query(
-        `insert into users(name, email, password, modifydate, modifyuserid, active, usertypeid, isadmin) values ('${req.body.name}','${req.body.email}', '${passwordHash}', '${formattedDate}', ${req.body.userId},true, ${req.body.userTypeId}, false)`,
-      );
-
-      const response2 = await pool.query(
-        `insert into userclient(clientid, userid) values (${req.body.clientid},${newid})`,
-      );
-
-      result.data = JSON.stringify("OK");
-
-      res.json({ result });
+      return res.json({ result });
     }
-  } catch (error) {
-    result.status = false;
-    result.data = JSON.stringify(error);
+
+    const formattedDate = new Date().toISOString();
+
+    const passwordHash = CryptoJS.SHA1(req.body.password).toString();
+
+    console.log(3);
+
+    const response = await client.query(
+      `
+        INSERT INTO users
+        (
+          name,
+          email,
+          password,
+          modifydate,
+          modifyuserid,
+          active,
+          usertypeid
+        )
+        VALUES ($1, $2, $3, $4, $5, true, $6)
+        RETURNING id
+      `,
+      [
+        req.body.name,
+        req.body.email,
+        passwordHash,
+        formattedDate,
+        req.body.userId,
+        req.body.userTypeId,
+      ],
+    );
+
+    console.log(4);
+
+    const newUserId = response.rows[0].id;
+
+    await client.query(
+      `
+        INSERT INTO userclient(clientid, userid)
+        VALUES ($1, $2)
+      `,
+      [req.body.clientid, newUserId],
+    );
+
+    await client.query("COMMIT");
+
+    result.data = "OK";
 
     res.json({ result });
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    result.status = false;
+    result.data = error.message;
+
+    res.status(500).json({ result });
+  } finally {
+    client.release();
   }
 });
 
