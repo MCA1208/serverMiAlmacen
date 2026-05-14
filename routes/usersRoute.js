@@ -247,8 +247,6 @@ router.post("/createusersclient", async (req, res) => {
 
     const passwordHash = CryptoJS.SHA1(req.body.password).toString();
 
-    console.log(3);
-
     const response = await client.query(
       `
         INSERT INTO users
@@ -273,8 +271,6 @@ router.post("/createusersclient", async (req, res) => {
         req.body.userTypeId,
       ],
     );
-
-    console.log(4);
 
     const newUserId = response.rows[0].id;
 
